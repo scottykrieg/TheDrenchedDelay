@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<JUCERPROJECT id="ChromaDelay" name="ChromaDelay" projectType="audioplug" version="1.0.0"
+              bundleIdentifier="com.yourcompany.chromadelay" pluginName="ChromaDelay"
+              pluginDesc="Feature-rich stereo delay with effects chain" pluginManufacturer="Your Company"
+              pluginManufacturerCode="Yrcm" pluginCode="CrDl" pluginChannelConfigs="{2, 2}"
+              pluginAUIsSynth="0" pluginAUWantsMIDI="0" pluginAUProducesMS="0"
+              pluginAUSupportedNumChannels="2" pluginVSTCategory="kPlugCategEffect"
+              pluginVST3Category="Fx" pluginFormats="Standalone,VST3,buildVST3"
+              cppLanguageStandard="20" jucerFormatVersion="1">
+  <MAINGROUP id="ChromaDelay" name="ChromaDelay">
+    <GROUP id="Source" name="Source">
+      <FILE id="PluginProcessor_h" name="PluginProcessor.h" compile="0" resource="0"
+            file="Source/PluginProcessor.h"/>
+      <FILE id="PluginProcessor_cpp" name="PluginProcessor.cpp" compile="1"
+            resource="0" file="Source/PluginProcessor.cpp"/>
+      <FILE id="PluginEditor_h" name="PluginEditor.h" compile="0" resource="0"
+            file="Source/PluginEditor.h"/>
+      <FILE id="PluginEditor_cpp" name="PluginEditor.cpp" compile="1" resource="0"
+            file="Source/PluginEditor.cpp"/>
+      <GROUP id="DSP" name="DSP">
+        <FILE id="DelayEngine_h" name="DelayEngine.h" compile="0" resource="0"
+              file="Source/DSP/DelayEngine.h"/>
+        <FILE id="DelayEngine_cpp" name="DelayEngine.cpp" compile="1" resource="0"
+              file="Source/DSP/DelayEngine.cpp"/>
+        <FILE id="Effects_h" name="Effects.h" compile="0" resource="0" file="Source/DSP/Effects.h"/>
+      </GROUP>
+    </GROUP>
+  </MAINGROUP>
+  <MODULES>
+    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_plugin_client" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_audio_processors_headless" showAllCode="1" useLocalCopy="0"
+            useGlobalPath="0"/>
+    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
+    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
+  </MODULES>
+  <EXPORTFORMATS>
+    <VS2022 targetFolder="Builds/VisualStudio2022">
+      <CONFIGURATIONS>
+        <CONFIGURATION name="Debug" isDebug="1" optimisation="1" binaryName="ChromaDelay"
+                       headerPath="" libraryPath="" defines="DEBUG=1 _DEBUG=1 JucePlugin_Build_VST3=1 JucePlugin_Build_Standalone=1 JUCE_VST3_CAN_REPLACE_VST2=0"
+                       cppLanguageStandard="20" warningsAreErrors="0"/>
+        <CONFIGURATION name="Release" isDebug="0" optimisation="3" binaryName="ChromaDelay"
+                       headerPath="" libraryPath="" defines="NDEBUG=1 JucePlugin_Build_VST3=1 JucePlugin_Build_Standalone=1 JUCE_VST3_CAN_REPLACE_VST2=0"
+                       cppLanguageStandard="20" warningsAreErrors="0" linkTimeOptimisation="1"/>
+      </CONFIGURATIONS>
+      <MODULEPATHS>
+        <MODULEPATH id="juce_audio_basics" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_devices" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_formats" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_plugin_client" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_utils" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_core" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_data_structures" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_dsp" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_events" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_graphics" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_basics" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_gui_extra" path="C:/JUCE/modules"/>
+        <MODULEPATH id="juce_audio_processors_headless" path="../../../../../JUCE/modules"/>
+      </MODULEPATHS>
+    </VS2022>
+  </EXPORTFORMATS>
+  <JUCEOPTIONS/>
+</JUCERPROJECT>

@@ -1,3 +1,4 @@
+// DelayEngine.cpp
 #include <JuceHeader.h>
 #include "DelayEngine.h"
 #include "Effects.h"
@@ -48,6 +49,9 @@ void DelayEngine::prepare(const juce::dsp::ProcessSpec& spec)
     reverb->prepare(sampleRate);
     reverser->prepare(sampleRate);
 
+    dcBlockers[0].reset();
+    dcBlockers[1].reset();
+
     isFrozen = false;
     overrideDelayMs.store(-1.f);
 }
@@ -65,18 +69,19 @@ void DelayEngine::reset()
     ghostDelay->reset();
     reverb->reset();
     reverser->reset();
+
+    dcBlockers[0].reset();
+    dcBlockers[1].reset();
+
     isFrozen = false;
 }
 
 //==============================================================================
 void DelayEngine::process(juce::AudioBuffer<float>& buffer)
 {
-    const int numSamples = buffer.getNumSamples();
+    const int   numSamples = buffer.getNumSamples();
     const float sr = (float)sampleRate;
 
-    // -------------------------------------------------------------------------
-    // Read parameters (atomic raw values — thread-safe)
-    // -------------------------------------------------------------------------
     auto raw = [&](const juce::String& id) -> float {
         return *apvts.getRawParameterValue(id);
     };
@@ -88,25 +93,19 @@ void DelayEngine::process(juce::AudioBuffer<float>& buffer)
     const float gridOffsetMs = raw(ParamID::gridOffset);
     const bool  syncEnabled = raw(ParamID::syncEnabled) > 0.5f;
 
-    // Delay time
     float delayMs = (overrideDelayMs.load() > 0.f && syncEnabled)
         ? overrideDelayMs.load()
         : raw(ParamID::delayTimeMs);
     delayMs = juce::jlimit(1.f, kMaxDelayMs - 20.f, delayMs);
 
-    // Convert to samples (with grid offset)
     float delaySamps = delayMs * 0.001f * sr;
     float gridOffsetSamps = gridOffsetMs * 0.001f * sr;
 
-    // Lock/Hold: snapshot on transition
     if (lockHold && !isFrozen)
     {
-        // Copy current delay buffer
         for (int c = 0; c < 2; ++c)
-        {
             for (int s = 0; s < maxDelaySamps; ++s)
                 frozenBuf.setSample(c, s, delayBuf.getBuffer().getSample(c, s));
-        }
         frozenWritePos = delayBuf.getWritePos();
         isFrozen = true;
     }
@@ -115,7 +114,6 @@ void DelayEngine::process(juce::AudioBuffer<float>& buffer)
         isFrozen = false;
     }
 
-    // Effect enables
     const bool bcOn = raw(ParamID::bcEnabled) > 0.5f;
     const bool satOn = raw(ParamID::satEnabled) > 0.5f;
     const bool filtOn = raw(ParamID::filtEnabled) > 0.5f;
@@ -127,35 +125,23 @@ void DelayEngine::process(juce::AudioBuffer<float>& buffer)
     const bool reverbOn = raw(ParamID::reverbEnabled) > 0.5f;
     const bool reverseOn = raw(ParamID::reverseEnabled) > 0.5f;
 
-    // Harmonizer mode: 0=Static (post-loop), 1=Cascade (in-loop)
     const bool harmCascade = (int)raw(ParamID::harmMode) == 1;
     const int  harmSemi = (int)raw(ParamID::harmInterval);
 
-    // Reverb params (update once per block)
     if (reverbOn)
         reverb->setParams(raw(ParamID::reverbSize), raw(ParamID::reverbDamping));
 
-    // Tremolo sync
-    if (tremOn && raw(ParamID::tremSync) > 0.5f)
-    {
-        // Use BPM from processor — read via apvts listener or another mechanism.
-        // For now default to tremolo rate param.
-    }
-
-    // -------------------------------------------------------------------------
-    // Sample loop
     // -------------------------------------------------------------------------
     for (int s = 0; s < numSamples; ++s)
     {
         const float dryL = buffer.getSample(0, s);
         const float dryR = buffer.getSample(1, s);
 
-        // ------ Read from delay buffer ------
+        // --- Read from delay buffer ---
         float wetL, wetR;
 
         if (isFrozen)
         {
-            // Read frozen snapshot circularly
             int rPos = (frozenWritePos - (int)delaySamps + maxDelaySamps * 2) % maxDelaySamps;
             wetL = frozenBuf.getSample(0, rPos);
             wetR = frozenBuf.getSample(1, rPos);
@@ -166,14 +152,14 @@ void DelayEngine::process(juce::AudioBuffer<float>& buffer)
             wetR = delayBuf.read(1, delaySamps + gridOffsetSamps);
         }
 
-        // ------ Reverse effect (pre-mix, on wet signal) ------
+        // --- Reverse ---
         if (reverseOn)
         {
             wetL = reverser->process(wetL, 0, delayMs);
             wetR = reverser->process(wetR, 1, delayMs);
         }
 
-        // ------ Effect chain on the wet (repeat) signal ------
+        // --- Effect chain ---
         wetL = processEffectChain(wetL, 0, sr, bcOn, satOn, filtOn,
             chorusOn, phaserOn, tremOn,
             harmOn, harmCascade, ghostOn, false, apvts);
@@ -181,43 +167,76 @@ void DelayEngine::process(juce::AudioBuffer<float>& buffer)
             chorusOn, phaserOn, tremOn,
             harmOn, harmCascade, ghostOn, false, apvts);
 
-        // ------ Reverb (stereo, post-chain) ------
+        // --- Reverb (stereo, post-chain) ---
         if (reverbOn)
-        {
-            float reverbMix = raw(ParamID::reverbMix);
-            reverb->processBlock(wetL, wetR, reverbMix);
-        }
+            reverb->processBlock(wetL, wetR, raw(ParamID::reverbMix));
 
-        // ------ Phase Invert ------
+        // --- Phase invert ---
         if (phaseInv) { wetL = -wetL; wetR = -wetR; }
 
-        // ------ Static Harmonizer (post-loop) ------
+        // --- Static Harmonizer ---
         if (harmOn && !harmCascade)
         {
-            float hMix = raw(ParamID::harmMix);
+            const float hMix = raw(ParamID::harmMix);
             wetL = harmonizer->process(wetL, 0, harmSemi, hMix);
             wetR = harmonizer->process(wetR, 1, harmSemi, hMix);
         }
 
-        // ------ Write to delay buffer (input + feedback) ------
+        // --- Write to delay buffer ---
+        // Soft-clip then DC-block before writing back. This is what prevents
+        // the runaway explosion when bitcrusher/saturation boost the signal:
+        // the soft clipper keeps the magnitude ≤1, and the DC blocker removes
+        // any offset that saturation asymmetries inject on every loop around.
         if (!isFrozen)
         {
-            delayBuf.writeAndAdvance(0, dryL + wetL * feedback);
-            delayBuf.writeAndAdvance(1, dryR + wetR * feedback);
+            float fbL = feedbackSoftClip(dryL + wetL * feedback);
+            float fbR = feedbackSoftClip(dryR + wetR * feedback);
+            fbL = dcBlockers[0].process(fbL);
+            fbR = dcBlockers[1].process(fbR);
+
+            delayBuf.writeAndAdvance(0, fbL);
+            delayBuf.writeAndAdvance(1, fbR);
             delayBuf.advance();
         }
 
-        // ------ Mix ------
-        float outL = dryL + (wetL - dryL) * mix;
-        float outR = dryR + (wetR - dryR) * mix;
-
-        // Safety limiter — hard-clip at ±1 to prevent digital explosions
-        outL = juce::jlimit(-1.f, 1.f, outL);
-        outR = juce::jlimit(-1.f, 1.f, outR);
+        // --- Mix ---
+        const float outL = juce::jlimit(-1.f, 1.f, dryL + (wetL - dryL) * mix);
+        const float outR = juce::jlimit(-1.f, 1.f, dryR + (wetR - dryR) * mix);
 
         buffer.setSample(0, s, outL);
         buffer.setSample(1, s, outR);
     }
+}
+
+//==============================================================================
+// Smooth cubic soft-clipper for the feedback path.
+//
+// Response:
+//   |x| ≤ knee        → linear pass-through
+//   knee < |x| ≤ 1.0  → cubic Hermite curve, slopes to zero at output = 1
+//   |x| > 1.0         → hard-clip (catches denormals / very extreme inputs)
+//
+// knee = 0.82 gives ~2.7 dB of headroom before the soft region begins,
+// which is enough that normal effect processing at unity gain is unaffected,
+// while stacked drive/crush at high feedback is contained.
+float DelayEngine::feedbackSoftClip(float x) noexcept
+{
+    constexpr float knee = 0.82f;
+    const float     ax = std::abs(x);
+
+    if (ax <= knee)
+        return x;
+
+    if (ax >= 1.f)
+        return (x > 0.f) ? 1.f : -1.f;
+
+    const float sign = (x > 0.f) ? 1.f : -1.f;
+    // Normalise the over-threshold portion to [0, 1]
+    const float t = (ax - knee) / (1.f - knee);
+    // Cubic Hermite: starts at 1 (slope 1), ends at 0 (slope 0)
+    // maps to output range [knee, 1]
+    const float shaped = t * t * (3.f - 2.f * t);           // smoothstep
+    return sign * (knee + (1.f - knee) * shaped);
 }
 
 //==============================================================================
@@ -228,55 +247,46 @@ float DelayEngine::processEffectChain(float sample, int ch, float sr,
     bool ghostOn, bool /*reverbOn*/,
     juce::AudioProcessorValueTreeState& apvtsRef)
 {
-    (void)sr; // sample rate available if needed by future effects
+    (void)sr;
     auto raw = [&](const juce::String& id) -> float {
         return *apvtsRef.getRawParameterValue(id);
     };
 
-    // 1. Bitcrusher
     if (bcOn)
         sample = bitcrusher->process(sample, ch,
-            raw(ParamID::bcBits),
-            raw(ParamID::bcSampleRateDiv));
+            raw(ParamID::bcBits), raw(ParamID::bcSampleRateDiv));
 
-    // 2. Saturation
     if (satOn)
         sample = saturator->process(sample, raw(ParamID::satDrive));
 
-    // 3. Filter
     if (filtOn)
         sample = resonantFilter->process(sample, ch,
             (int)raw(ParamID::filtType),
             raw(ParamID::filtCutoff),
             raw(ParamID::filtResonance));
 
-    // 4. Chorus / Vibrato
     if (chorusOn)
         sample = chorus->process(sample, ch,
             raw(ParamID::chorusRate),
             raw(ParamID::chorusDepth),
             raw(ParamID::chorusMix));
 
-    // 5. Phaser
     if (phaserOn)
         sample = phaser->process(sample, ch,
             raw(ParamID::phaserRate),
             raw(ParamID::phaserDepth),
             raw(ParamID::phaserFeedback));
 
-    // 6. Tremolo
     if (tremOn)
         sample = tremolo->process(sample, ch,
             raw(ParamID::tremRate),
             raw(ParamID::tremDepth));
 
-    // 7. Harmonizer in Cascade mode (in feedback loop)
     if (harmOn && harmCascade)
         sample = harmonizer->process(sample, ch,
             (int)raw(ParamID::harmInterval),
             raw(ParamID::harmMix));
 
-    // 8. Ghost Delay
     if (ghostOn)
         sample = ghostDelay->process(sample, ch,
             raw(ParamID::ghostTime),

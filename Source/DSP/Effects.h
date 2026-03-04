@@ -48,13 +48,15 @@ public:
         // drive: 0..1  → boost 1..20x before soft clip
         float gain = 1.f + drive * 19.f;
         float x = sample * gain;
-        // Soft clip: tanh approximation (Pade)
+        // Soft clip: tanh Padé approximation
         float ax = std::abs(x);
         float sign = x >= 0.f ? 1.f : -1.f;
         float shaped = (ax < 1.f) ? (x - x * x * x / 3.f)
             : sign * 0.6667f;
-        // Compensate gain
-        return shaped / std::sqrt(gain);
+        // Divide by gain (not sqrt(gain)) to restore unity gain for small signals.
+        // sqrt(gain) was leaving a net amplification of sqrt(gain) ≈ 4.5x at
+        // full drive, which compounded catastrophically in the feedback loop.
+        return shaped / gain;
     }
 };
 
@@ -377,7 +379,7 @@ public:
     void prepare(double sr)
     {
         sampleRate = sr;
-        int maxSamps = (int)(sr * 1.1); // max ~1000ms + headroom
+        int maxSamps = (int)(sr * 1.1);
         for (int c = 0; c < 2; ++c)
         {
             buf[c].assign(maxSamps, 0.f);
@@ -403,16 +405,16 @@ public:
         // Read
         float rPosF = (float)wPtr[ch] - delaySamps;
         while (rPosF < 0.f) rPosF += (float)bufSize;
-        int r0 = (int)rPosF % bufSize;
+        int   r0 = (int)rPosF % bufSize;
         float fr = rPosF - (float)(int)rPosF;
-        int r1 = (r0 + 1) % bufSize;
+        int   r1 = (r0 + 1) % bufSize;
         float wetOut = buf[ch][r0] * (1.f - fr) + buf[ch][r1] * fr;
 
-        // Write with feedback
-        buf[ch][wPtr[ch]] = input + wetOut * feedback;
+        // Write with feedback — clamped to prevent the ghost's own internal
+        // loop from diverging independently of the main delay feedback level.
+        buf[ch][wPtr[ch]] = juce::jlimit(-1.f, 1.f, input + wetOut * feedback);
         wPtr[ch] = (wPtr[ch] + 1) % bufSize;
 
-        // Ghost blends at 50% wet by design
         return (input + wetOut) * 0.5f;
     }
 
@@ -422,6 +424,7 @@ private:
     int wPtr[2] = {};
     int bufSize = 0;
 };
+
 
 //==============================================================================
 // REVERB — Schroeder / Moorer style using JUCE's built-in reverb

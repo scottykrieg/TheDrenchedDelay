@@ -135,23 +135,26 @@ public:
         g.fillRoundedRectangle(b, 6.f);
         g.setColour(accentColour.withAlpha(0.35f));
         g.drawRoundedRectangle(b.reduced(0.5f), 6.f, 1.f);
-        g.setFont(juce::Font(juce::FontOptions{}.withHeight(9.f)
-            .withStyle("Bold")));
+        g.setFont(juce::Font(juce::FontOptions{}.withHeight(9.f).withStyle("Bold")));
         g.setColour(accentColour);
         g.drawText(title.toUpperCase(),
             getLocalBounds().reduced(8, 0).removeFromTop(18),
             juce::Justification::centredLeft);
     }
 
+    /// Returns the usable content rectangle in the PARENT component's coordinate space.
+    /// (Children of the parent tab are positioned using these coordinates.)
     juce::Rectangle<int> getContentBounds() const
     {
-        return getLocalBounds().reduced(6).withTrimmedTop(16);
+        // getBounds() is already in parent space; trim border + title bar
+        return getBounds().reduced(6).withTrimmedTop(16);
     }
 
 private:
     juce::String title;
     juce::Colour accentColour;
 };
+
 
 //==============================================================================
 // Main editor — 100% native JUCE, no WebView, no browser

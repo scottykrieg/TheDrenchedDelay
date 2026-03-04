@@ -13,9 +13,6 @@ static const juce::Colour TAB_BG(0xff1a1a26);
 ChromaDelayEditor::ChromaDelayEditor(ChromaDelayAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p)
 {
-    setSize(860, 560);
-    setResizable(true, true);
-    setResizeLimits(700, 460, 1400, 900);
 
     //----------------------------------------------------------------------
     // Style the tab bar
@@ -128,6 +125,11 @@ ChromaDelayEditor::ChromaDelayEditor(ChromaDelayAudioProcessor& p)
     addAndMakeVisible(tabs);
 
     startTimerHz(10);
+
+    setSize(860, 560);
+    setResizable(true, true);
+    setResizeLimits(700, 460, 1400, 900);
+
 }
 
 ChromaDelayEditor::~ChromaDelayEditor()

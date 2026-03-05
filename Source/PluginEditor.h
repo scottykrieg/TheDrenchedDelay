@@ -98,11 +98,21 @@ public:
         combo.setColour(juce::ComboBox::textColourId, juce::Colour(0xffc0b090));
         combo.setColour(juce::ComboBox::outlineColourId, juce::Colour(0xff3a3a4a));
         combo.setColour(juce::ComboBox::arrowColourId, juce::Colour(0xffc8a84b));
+
+        // Populate items from the parameter's choices BEFORE creating
+        // the attachment — attachment needs items present to set initial value
+        if (auto* choiceParam = dynamic_cast<juce::AudioParameterChoice*>(
+            apvts.getParameter(paramID)))
+        {
+            combo.addItemList(choiceParam->choices, 1);
+        }
+
         addAndMakeVisible(combo);
 
         attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
             (apvts, paramID, combo);
     }
+
 
     void resized() override
     {

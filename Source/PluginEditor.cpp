@@ -148,13 +148,29 @@ void ChromaDelayEditor::paint(juce::Graphics& g)
     g.setColour(GOLD.withAlpha(0.3f));
     g.drawLine(0.f, 40.f, (float)getWidth(), 40.f, 1.f);
 
-    // Plugin name
+    // Plugin name — "The DRENCHED Delay"
+    const int headerY = 0;
+    const int headerH = 40;
+    int x = 16;
+
+    g.setFont(juce::Font(juce::FontOptions{}.withHeight(16.f)));
+    g.setColour(juce::Colour(0xff7a7a9a));
+    g.drawText("The", x, headerY, 36, headerH, juce::Justification::centredLeft);
+    x += 38;
+
     g.setFont(juce::Font(juce::FontOptions{}.withHeight(20.f).withStyle("Bold")));
     g.setColour(GOLD);
-    g.drawText("CHROMA", 16, 0, 100, 40, juce::Justification::centredLeft);
-    g.setFont(juce::Font(juce::FontOptions{}.withHeight(20.f)));
+    g.drawText("DRENCHED", x, headerY, 120, headerH, juce::Justification::centredLeft);
+    x += 122;
+
+    g.setFont(juce::Font(juce::FontOptions{}.withHeight(16.f)));
     g.setColour(juce::Colour(0xff7a7a9a));
-    g.drawText("DELAY", 108, 0, 80, 40, juce::Justification::centredLeft);
+    g.drawText("Delay", x, headerY, 60, headerH, juce::Justification::centredLeft);
+
+    // Version (keep as-is)
+    g.setFont(juce::Font(juce::FontOptions{}.withHeight(9.f)));
+    g.setColour(juce::Colour(0xff3a3a5a));
+    g.drawText("v1.0.0", getWidth() - 56, 0, 48, 40, juce::Justification::centredRight);
 
     // Version
     g.setFont(juce::Font(juce::FontOptions{}.withHeight(9.f)));

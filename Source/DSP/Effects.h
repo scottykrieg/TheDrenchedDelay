@@ -272,18 +272,13 @@ private:
 };
 
 //==============================================================================
-// HARMONIZER — stable two-grain overlap-add pitch shifter
-//
-// Uses two grains offset by half the grain size that crossfade continuously.
-// This avoids the unchecked negative index bugs in the previous version.
-// Supports Static (post-loop) and Cascade (in-loop) modes.
+// HARMONIZER — cache pitch ratio, use float math
 //==============================================================================
 class Harmonizer
 {
 public:
-    // Grain size: 2048 samples (~46ms at 44.1k) — good pitch accuracy vs latency
     static constexpr int GRAIN = 2048;
-    static constexpr int BUF_LEN = GRAIN * 8; // circular input buffer
+    static constexpr int BUF_LEN = GRAIN * 8;
 
     void prepare(double sr)
     {
@@ -292,9 +287,11 @@ public:
         {
             inputBuf[c].assign(BUF_LEN, 0.f);
             writePos[c] = 0;
-            grainPhase[c] = 0.0;
-            grain2Phase[c] = 0.5; // second grain offset by half period
+            grainPhase[c] = 0.f;
+            grain2Phase[c] = 0.5f;
         }
+        cachedSemitones = INT_MIN; // force recalc on first use
+        cachedRatio = 1.f;
     }
 
     void reset()
@@ -303,72 +300,61 @@ public:
         {
             std::fill(inputBuf[c].begin(), inputBuf[c].end(), 0.f);
             writePos[c] = 0;
-            grainPhase[c] = 0.0;
-            grain2Phase[c] = 0.5;
+            grainPhase[c] = 0.f;
+            grain2Phase[c] = 0.5f;
         }
     }
 
     float process(float input, int ch, int semitones, float mix)
     {
-        jassert(ch == 0 || ch == 1);
+        if (semitones == 0) return input;
 
-        if (semitones == 0)
-            return input;
+        // Only recompute pow() when the knob actually changes
+        if (semitones != cachedSemitones)
+        {
+            cachedSemitones = semitones;
+            cachedRatio = (float)std::pow(2.0, semitones / 12.0);
+        }
 
-        // Write input into circular buffer
         inputBuf[ch][writePos[ch]] = input;
         writePos[ch] = (writePos[ch] + 1) % BUF_LEN;
 
-        // Pitch ratio: > 1 = pitch up, < 1 = pitch down
-        const double ratio = std::pow(2.0, semitones / 12.0);
+        const float phaseInc = 1.f / (float)GRAIN;
+        grainPhase[ch] = std::fmod(grainPhase[ch] + phaseInc, 1.f);
+        grain2Phase[ch] = std::fmod(grain2Phase[ch] + phaseInc, 1.f);
 
-        // Advance grain phases — each phase represents position 0..1 within a grain period
-        // The read pointer advances at (ratio) samples per sample written,
-        // so the output is pitch-shifted by the ratio.
-        const double phaseInc = 1.0 / (double)GRAIN;
-        grainPhase[ch] = std::fmod(grainPhase[ch] + phaseInc, 1.0);
-        grain2Phase[ch] = std::fmod(grain2Phase[ch] + phaseInc, 1.0);
-
-        // Read position for each grain: we read backwards through the buffer
-        // at a rate controlled by the pitch ratio
-        auto readSample = [&](double phase) -> float
+        auto readSample = [&](float phase) -> float
         {
-            // Hann window
             const float window = 0.5f - 0.5f * std::cos(
-                juce::MathConstants<float>::twoPi * (float)phase);
+                juce::MathConstants<float>::twoPi * phase);
+            const float readOffset = (1.f - phase) * (float)GRAIN * cachedRatio;
+            const float safeOffset = juce::jlimit(1.f, (float)(BUF_LEN - 1), readOffset);
 
-            // Read position: current write position minus a pitch-scaled offset
-            const double readOffset = (1.0 - phase) * GRAIN * ratio;
-
-            // Clamp offset to buffer range (never read further back than BUF_LEN - 1)
-            const double safeOffset = juce::jlimit(1.0, (double)(BUF_LEN - 1), readOffset);
-
-            double rPosF = (double)writePos[ch] - safeOffset;
-            // Wrap into valid buffer range
-            while (rPosF < 0.0)        rPosF += (double)BUF_LEN;
-            while (rPosF >= (double)BUF_LEN) rPosF -= (double)BUF_LEN;
+            float rPosF = (float)writePos[ch] - safeOffset;
+            while (rPosF < 0.f)            rPosF += (float)BUF_LEN;
+            while (rPosF >= (float)BUF_LEN) rPosF -= (float)BUF_LEN;
 
             const int   r0 = (int)rPosF;
-            const float fr = (float)(rPosF - r0);
+            const float fr = rPosF - (float)r0;
             const int   r1 = (r0 + 1) % BUF_LEN;
-
             return (inputBuf[ch][r0] * (1.f - fr) + inputBuf[ch][r1] * fr) * window;
         };
 
-        // Two grains sum to a flat amplitude envelope (Hann overlap-add property)
         const float wet = readSample(grainPhase[ch]) + readSample(grain2Phase[ch]);
-
         return input * (1.f - mix) + wet * mix;
     }
 
 private:
     double sampleRate = 44100.0;
+    int    cachedSemitones = INT_MIN;
+    float  cachedRatio = 1.f;
 
     std::vector<float> inputBuf[2];
-    int    writePos[2] = {};
-    double grainPhase[2] = {};
-    double grain2Phase[2] = { 0.5, 0.5 };
+    int   writePos[2] = {};
+    float grainPhase[2] = {};
+    float grain2Phase[2] = { 0.5f, 0.5f };
 };
+
 
 //==============================================================================
 // GHOST DELAY — simple secondary delay for multi-tap patterns
@@ -427,7 +413,7 @@ private:
 
 
 //==============================================================================
-// REVERB — Schroeder / Moorer style using JUCE's built-in reverb
+// REVERB — block-based, no per-sample allocation
 //==============================================================================
 class ReverbEffect
 {
@@ -438,6 +424,8 @@ public:
         spec.maximumBlockSize = 4096;
         spec.numChannels = 2;
         rev.prepare(spec);
+        // Pre-allocate the working buffer at max block size
+        workBuf.setSize(2, 4096, false, true, true);
     }
 
     void reset() { rev.reset(); }
@@ -453,31 +441,35 @@ public:
         rev.setParameters(p);
     }
 
-    // Process stereo pair
-    void processBlock(float& l, float& r, float mix)
+    // Call once per block instead of once per sample.
+    // dryBuf contains the pre-reverb wet signal; this overwrites it in-place
+    // blended to mix. numSamples must be <= 4096.
+    void processBlock(juce::AudioBuffer<float>& buf, int numSamples, float mix)
     {
-        float wetL = l, wetR = r;
-        // process through reverb
-        juce::dsp::AudioBlock<float> tempBlock;
-        // Inline single-sample fallback (cheap but functional for prototype)
-        // For production: use block-based processing
-        float buf[2][1] = { {l}, {r} };
-        float* ptrs[2] = { buf[0], buf[1] };
-        juce::AudioBuffer<float> ab(ptrs, 2, 1);
-        juce::dsp::AudioBlock<float> blk(ab);
+        // Copy into work buffer
+        workBuf.copyFrom(0, 0, buf, 0, 0, numSamples);
+        workBuf.copyFrom(1, 0, buf, 1, 0, numSamples);
+
+        juce::dsp::AudioBlock<float> blk(workBuf.getArrayOfWritePointers(),
+            2, 0, (size_t)numSamples);
         juce::dsp::ProcessContextReplacing<float> ctx(blk);
         rev.process(ctx);
-        wetL = ab.getSample(0, 0);
-        wetR = ab.getSample(1, 0);
-        l = l * (1.f - mix) + wetL * mix;
-        r = r * (1.f - mix) + wetR * mix;
+
+        // Mix back
+        for (int s = 0; s < numSamples; ++s)
+        {
+            buf.setSample(0, s, buf.getSample(0, s) * (1.f - mix)
+                + workBuf.getSample(0, s) * mix);
+            buf.setSample(1, s, buf.getSample(1, s) * (1.f - mix)
+                + workBuf.getSample(1, s) * mix);
+        }
     }
 
 private:
-    juce::dsp::Reverb rev;
+    juce::dsp::Reverb      rev;
     juce::dsp::ProcessSpec spec {};
+    juce::AudioBuffer<float> workBuf;
 };
-
 //==============================================================================
 // REVERSE BUFFER — collects delay-sized chunks and plays them backwards
 //==============================================================================

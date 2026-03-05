@@ -78,6 +78,33 @@ private:
     int bufferSize = 0;
 };
 
+/// All parameter values fetched once per block. Passed by const-ref into
+/// processEffectChain so there are zero string lookups on the audio thread.
+struct CachedParams
+{
+    // Core
+    float mix, feedback, gridOffsetMs, delayTimeMs;
+    bool  lockHold, phaseInvert, syncEnabled;
+
+    // Effects on/off
+    bool bcOn, satOn, filtOn, chorusOn, phaserOn;
+    bool tremOn, harmOn, ghostOn, reverbOn, reverseOn;
+    bool harmCascade;
+    int  harmSemi;
+
+    // Effect values
+    float bcBits, bcSrDiv;
+    float satDrive;
+    int   filtType;
+    float filtCutoff, filtRes;
+    float chorusRate, chorusDepth, chorusMix;
+    float phaserRate, phaserDepth, phaserFb;
+    float tremRate, tremDepth;
+    float harmMix;
+    float ghostTime, ghostFb;
+    float reverbSize, reverbDamp, reverbMix;
+};
+
 //==============================================================================
 class DelayEngine
 {
@@ -127,12 +154,7 @@ private:
     std::unique_ptr<ReverbEffect>   reverb;
     std::unique_ptr<ReverseBuffer>  reverser;
 
-    float processEffectChain(float sample, int channel, float sampleRateF,
-        bool bcOn, bool satOn, bool filtOn,
-        bool chorusOn, bool phaserOn, bool tremOn,
-        bool harmOn, bool harmCascade,
-        bool ghostOn, bool reverbOn,
-        juce::AudioProcessorValueTreeState& apvts);
+    float processEffectChain(float sample, int channel, const CachedParams& p);;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DelayEngine)
 };
